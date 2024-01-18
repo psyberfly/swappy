@@ -1,0 +1,17 @@
+swappy:
+  create:
+  receive:
+  history:
+  balance:
+  send:
+
+
+# swappy create --electrum electrum.bullbitcoin.com --boltz testnet.api.boltz.exchange
+
+# swappy receive chain
+# swappy send chain <address> <amount>
+
+# swappy [history,balance]
+
+# swappy receive ln <amount>
+# swappy send ln <invoice>
