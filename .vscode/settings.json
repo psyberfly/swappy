@@ -2,8 +2,11 @@
     "rust-analyzer.checkOnSave.command": "clippy",
     "rust-analyzer.cargo.loadOutDirsFromCheck": true,
     "rust-analyzer.procMacro.enable": true,
-    "rust-analyzer.cargo.allFeatures": true,
+    "rust-analyzer.highlightRelated.references.enable": true,
+        "rust-analyzer.cargo.allFeatures": true,
     "rust-analyzer.lens.enable": true,
+    "rust-analyzer.lens.location": "above_name",
+    "rust-analyzer.inlayHints.typeHints.enable": true,
     "rust-analyzer.lens.run": true,
     "rust-analyzer.lens.debug": true,
     "rust-analyzer.cargo.runBuildScripts": true,
@@ -13,7 +16,7 @@
         "source.fixAll": true
     },
     "[rust]": {
-        //"editor.defaultFormatter": "matklad.rust-analyzer",
+        "editor.defaultFormatter": "rust-lang.rust-analyzer",
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
             "source.organizeImports": true
