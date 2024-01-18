@@ -2,9 +2,9 @@ mod db;
 mod util;
 mod wallet;
 
-use clap::{Arg, Command};
+use clap::{Arg, ArgMatches, Command};
+use db::{create_db, read_db, WalletInfoModel};
 use wallet::key;
-
 fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
     let path = "/home/anorak/.swappy";
@@ -39,34 +39,16 @@ fn main() {
 
     match api.subcommand() {
         Some(("create", arg_matches)) => {
-            // check if db already exists; if true return "Db Exists"; else continue
-            // create wallet
-            // show user mnemonic
-            // ask user to confirm that backup is complete
-            // then do the below
-            let electrum = arg_matches.get_one::<String>("electrum").unwrap();
-            let boltz = arg_matches.get_one::<String>("boltz").unwrap();
-            let db = sled::open(path).unwrap(); // as in fs::open
-            db.insert(b"electrum", electrum.as_bytes()).unwrap();          
-            db.insert(b"boltz", boltz.as_bytes()).unwrap();
-            // insert wallet data (mnemonic and public descriptor)
-            drop(db);
-            println!("Written to db.");
-            ()
-        },
+            let wallet_info = WalletInfoModel::from_arg_matches(arg_matches.clone());
+            create_db(wallet_info, path);
+        }
         Some(("read", _)) => {
-            let db = sled::open(path).unwrap();
-            let value = db.get("electrum").unwrap().unwrap();
-            let electrum= std::str::from_utf8(&value).unwrap();     
-            let value = db.get("boltz").unwrap().unwrap();
-            let boltz= std::str::from_utf8(&value).unwrap();     
-            println!("Electrum Url: {}", electrum);
-            println!("Boltz Url: {}", boltz);
-            ()
-        },
+            let wallet_info = read_db(path).unwrap();
+            println!("{:?}", wallet_info)
+        }
         None => {
             println!("COULD NOT FIND MATCHES. Try swappy help.")
-        },
+        }
         _ => {
             println!("COULD NOT FIND MATCHES. Try swappy help.")
         }
