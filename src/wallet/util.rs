@@ -3,7 +3,6 @@ use crate::wallet::util::bdk::wallet::AddressIndex::{New, Peek};
 use bdk::bitcoin::secp256k1::Secp256k1;
 use bdk::bitcoin::util::bip32::{DerivationPath, ExtendedPrivKey, ExtendedPubKey, Fingerprint};
 use bdk::bitcoin::{Address, Amount, Network, Transaction};
-use bdk::blockchain::{electrum, Blockchain, ElectrumBlockchain};
 use bdk::electrum_client::Client;
 use bdk::keys::bip39::Mnemonic;
 use bdk::keys::bip39::{Language, WordCount};
@@ -97,38 +96,6 @@ pub fn create_wallet(
     )
     .unwrap();
     Ok(wallet)
-}
-
-pub fn send_btc(
-    wallet: &Wallet<bdk::database::SqliteDatabase>,
-    to_address: &Address,
-    amount_btc: f64,
-    electrum_url: String,
-) -> Result<Transaction, String> {
-    let amount_sat = Amount::from_btc(amount_btc).unwrap();
-
-    let mut tx_builder = wallet.build_tx();
-    tx_builder
-        .add_recipient(to_address.script_pubkey(), amount_sat.to_sat())
-        .enable_rbf()
-        .fee_rate(FeeRate::from_sat_per_vb(5.0)); // Example fee rate, adjust as necessary
-
-    let (mut psbt, details) = tx_builder.finish().unwrap();
-
-    // Output the transaction details
-    println!("{:#?}", details);
-
-    // Sign the PSBT
-    wallet.sign(&mut psbt, SignOptions::default()).unwrap();
-
-    // Extract and broadcast the transaction
-    let tx = psbt.extract_tx();
-    // Broadcast the transaction using the Electrum client
-
-    let client = Client::new(&electrum_url).unwrap();
-    let blockchain = ElectrumBlockchain::from(client);
-    blockchain.broadcast(&tx).unwrap();
-    return Ok(tx.clone());
 }
 
 #[cfg(test)]
