@@ -3,18 +3,25 @@ mod util;
 mod wallet;
 use clap::{Arg, Command};
 use db::{create_db, read_db, NetworkInfoModel, WalletInfoModel};
+use lightning_invoice::{payment, Bolt11Invoice};
 use std::path::{Path, PathBuf};
 use wallet::util::{create_wallet, Descriptors};
 const SWAPPY_DIR: &str = ".swappy";
 use bdk::{
-    bitcoin::Network,
+    bitcoin::{Address, Network, Transaction},
     blockchain::ElectrumBlockchain,
     database::SqliteDatabase,
     electrum_client::Client,
     wallet::AddressIndex::{LastUnused, Peek},
     SyncOptions, Wallet,
 };
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::str::FromStr;
+use std::thread;
+use std::time::{Duration, Instant};
 
+use crate::wallet::util::send_btc;
 fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
     let api = Command::new("swappy")
@@ -98,7 +105,7 @@ fn main() {
                 println!("Backup not confirmed. Exiting.");
                 return;
             }
-            let descriptor = wallet::util::Descriptors::new(&mnemonic);
+            let descriptor = wallet::util::Descriptors::new_public(&mnemonic);
 
             let response = create_db(wallet_info, &path);
             match response {
@@ -156,7 +163,7 @@ fn main() {
         }
         Some(("sync", _)) => {
             let wallet_info = get_wallet_info().unwrap();
-            let wallet = init_wallet(&wallet_info).unwrap();
+            let wallet = init_public_wallet(&wallet_info).unwrap();
             let electrum_url = format!("ssl://{}", wallet_info.electrum_url);
             let client = Client::new(&electrum_url).unwrap();
             let blockchain = ElectrumBlockchain::from(client);
@@ -171,7 +178,7 @@ fn main() {
         }
         Some(("status", _)) => {
             let wallet_info = get_wallet_info().unwrap();
-            let wallet = init_wallet(&wallet_info).unwrap();
+            let wallet = init_public_wallet(&wallet_info).unwrap();
             let balance = wallet.get_balance().unwrap();
             let history = wallet.list_transactions(true).unwrap();
             let unconfirmed_balance = balance.untrusted_pending + balance.trusted_pending;
@@ -199,7 +206,7 @@ fn main() {
         }
         Some(("receive", _)) => {
             let wallet_info = get_wallet_info().unwrap();
-            let wallet = init_wallet(&wallet_info).unwrap();
+            let wallet = init_public_wallet(&wallet_info).unwrap();
             println!("How to recieve?");
             println!("0. Onchain");
             println!("1. Lightning");
@@ -210,6 +217,23 @@ fn main() {
                 .expect("Failed to read line");
             if confirmation.trim() == "1" {
                 println!("Getting invoice from boltz");
+                // initialize BoltzClient and swap
+                // construct SwapScript
+                let mut status = false;
+                let start = Instant::now();
+                loop {
+                    if status {
+                        println!("Got payment");
+                        // Create SwapTx and drain to wallet.get_address()
+                        break;
+                    } else if start.elapsed() > Duration::from_secs(60) {
+                        println!("Timed out waiting for payment. Invoice is no longer valid. DO NOT PAY.");
+                        break;
+                    } else {
+                        eprintln!("No payment yet...");
+                        thread::sleep(Duration::from_secs(10));
+                    }
+                }
             } else {
                 let address = wallet.get_address(LastUnused).unwrap();
                 println!("{:#?}", address.address.to_string());
@@ -217,9 +241,47 @@ fn main() {
         }
         Some(("send", _)) => {
             let wallet_info = get_wallet_info().unwrap();
-            let wallet = init_wallet(&wallet_info).unwrap();
-            let address = wallet.get_address(LastUnused);
-            println!("{:#?}", address);
+            let wallet = init_secret_wallet(&wallet_info).unwrap();
+
+            // ask user to paste address or invoice
+            println!("Enter an address or invoice: ");
+            let mut payment_info = String::new();
+            std::io::stdin()
+                .read_line(&mut payment_info)
+                .expect("Failed to read input");
+
+            // check if address;
+            match (Address::from_str(&payment_info)) {
+                Ok(address) => {
+                    println!("Resolved input to address. Paying...");
+                    //if address, make payment:
+                    let btc_amount = 0.00001;
+                    let electrum_url = wallet_info.electrum_url;
+                    match (send_btc(&wallet, &address, btc_amount, electrum_url)) {
+                        Ok(transaction) => {
+                            println!("Payment successful: {:#?}", transaction);
+                        }
+                        Err(e) => {
+                            eprintln!("Error in payment: {}", e)
+                        }
+                    };
+                }
+                Err(e) => {
+                    println!("Could not resolve input to address. Checking invoice...");
+                    //check if invoice:
+                    match (Bolt11Invoice::from_str(&payment_info)) {
+                        Ok(invoice) => {
+                            println!("Resolved input to invoice. Paying...");
+                            //if invoice, do submarine-swap
+                        }
+                        Err(e) => {
+                            println!("Could not resolve input to invoice");
+                            return;
+                        }
+                    }
+                }
+            }
+
             // println!("DELETING WALLET! CAREFUL! ARE YOU SURE? Type 'yes' to confirm.");
             // let mut confirmation = String::new();
             // std::io::stdin()
@@ -238,6 +300,7 @@ fn main() {
         }
     }
 }
+
 fn get_wallet_info() -> Result<NetworkInfoModel, String> {
     let mut root_path: PathBuf = match std::env::var("HOME") {
         Ok(home_path) => {
@@ -252,8 +315,8 @@ fn get_wallet_info() -> Result<NetworkInfoModel, String> {
     let wallet_info = read_db(&root_path)?;
     Ok(wallet_info)
 }
-fn init_wallet(wallet_info: &NetworkInfoModel) -> Result<Wallet<SqliteDatabase>, String> {
-    let descriptors = Descriptors::new(&wallet_info.display_secret())?;
+fn init_public_wallet(wallet_info: &NetworkInfoModel) -> Result<Wallet<SqliteDatabase>, String> {
+    let descriptors = Descriptors::new_public(&wallet_info.display_secret())?;
     let sqlite_path: PathBuf = match std::env::var("HOME") {
         Ok(home_path) => {
             let mut full_path = PathBuf::from(home_path);
@@ -266,3 +329,33 @@ fn init_wallet(wallet_info: &NetworkInfoModel) -> Result<Wallet<SqliteDatabase>,
     };
     create_wallet(descriptors, &sqlite_path)
 }
+fn init_secret_wallet(wallet_info: &NetworkInfoModel) -> Result<Wallet<SqliteDatabase>, String> {
+    let descriptors = Descriptors::new_secret(&wallet_info.display_secret())?;
+    let sqlite_path: PathBuf = match std::env::var("HOME") {
+        Ok(home_path) => {
+            let mut full_path = PathBuf::from(home_path);
+            full_path.push("bdk");
+            full_path
+        }
+        Err(e) => {
+            return Err(e.to_string());
+        }
+    };
+    create_wallet(descriptors, &sqlite_path)
+}
+
+fn create_submarine() -> () {
+    // return address to pay in send
+}
+// immediately pay this address
+
+fn create_reverse() -> () {
+    // returns invoice to get paid in receive
+}
+
+fn check_swap_status() -> () {}
+
+fn build_and_claim_tx() -> () {}
+// wait till someone pays the invoice
+// then create script and tx
+// drain funds into local wallet
